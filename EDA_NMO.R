@@ -28,13 +28,13 @@ register(SnowParam(15)) # set your cpu threads
 
 
 #first we get a view on sample types
-practice_data <- read.csv("extdata/raw_data.csv", header = F)
+practice_data <- read.csv("raw_data.csv", header = F)
 practice_info <- as.data.frame(t(practice_data[1:2, 1:57]))
 colnames(practice_info) <- c("Treatment", "Antibody")
 practice_info <- practice_info[-1,]
 rownames(practice_info) <- practice_data[3, 2:57]
 practice_info[is.na(practice_info)] <- "Untreated"
-write.table(practice_info, file = "extdata/practice_info.csv",
+write.table(practice_info, file = "practice_info.csv",
             sep = ',', col.names = T, row.names = T, quote = F)
 
 
@@ -46,7 +46,7 @@ practice_data <- practice_data[-1,]
 rownames(practice_data) <- practice_data$Ensembl_Gene_ID
 practice_data <- practice_data[,-1]
 practice_data <- data.matrix(practice_data)
-write.table(practice_data, file = "extdata/practice_data.csv",
+write.table(practice_data, file = "practice_data.csv",
             sep = ',', col.names = T, row.names = T, quote = F)
 
 
