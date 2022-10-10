@@ -9,32 +9,34 @@
 
 ################################################################################
 #Loading required libraries
-library(DESeq2)
-library(tidyverse)
-library(BiocParallel)
-library(org.Hs.eg.db)
-library(AnnotationDbi)
-library(EnhancedVolcano)
 library(vsn)
+library(DESeq2)
 library(apeglm)
+#library(biomaRt)
 library(pheatmap)
+library(tidyverse)
 library(gridExtra)
+library(org.Hs.eg.db)
+library(BiocParallel)
 library(clusterProfiler)
+library(EnhancedVolcano)
+
 
 
 ################################################################################
 #setting cpu parameter
-register(SnowParam(15)) # set your cpu threads
+register(SnowParam(15))
 
 
 #first we get a view on sample types
-practice_data <- read.csv("raw_data.csv", header = F)
+setwd("C:/Users/user/Desktop/NMO.practice/")
+practice_data <- read.csv("extdata/raw_data.csv", header = F)
 practice_info <- as.data.frame(t(practice_data[1:2, 1:57]))
 colnames(practice_info) <- c("Treatment", "Antibody")
 practice_info <- practice_info[-1,]
 rownames(practice_info) <- practice_data[3, 2:57]
 practice_info[is.na(practice_info)] <- "Untreated"
-write.table(practice_info, file = "practice_info.csv",
+write.table(practice_info, file = "extdata/practice_info.csv",
             sep = ',', col.names = T, row.names = T, quote = F)
 
 
@@ -46,7 +48,7 @@ practice_data <- practice_data[-1,]
 rownames(practice_data) <- practice_data$Ensembl_Gene_ID
 practice_data <- practice_data[,-1]
 practice_data <- data.matrix(practice_data)
-write.table(practice_data, file = "practice_data.csv",
+write.table(practice_data, file = "extdata/practice_data.csv",
             sep = ',', col.names = T, row.names = T, quote = F)
 
 
@@ -59,17 +61,6 @@ all(colnames(practice_data) %in% rownames(practice_info))
 all(colnames(practice_data) == rownames(practice_info))
 
 
-################################################################################
-#change gene names
-ens <- rownames(practice_data)
-symbols <- mapIds(org.Hs.eg.db, keys = ens, column = c("SYMBOL")
-                  , keytype = 'ENSEMBL')
-symbols <- symbols[!is.na(ens)]
-symbols <- symbols[match(rownames(practice_data), names(symbols))]
-rownames(practice_data) <- symbols
-keep <- !is.na(rownames(practice_data))
-practice_data <- practice_data[keep,]
-
 
 ################################################################################
 #factoring treatments and abs
@@ -81,28 +72,28 @@ practice_info$Antibody <- factor(practice_info$Antibody,
 
 ################################################################################
 #now let's make a DESeqDataSet object for ab
-dds_ab <- DESeqDataSetFromMatrix(countData = practice_data,
+raw_dds_ab <- DESeqDataSetFromMatrix(countData = practice_data,
                                  colData = practice_info,
                                  design = ~ Antibody)
 
 
 #another one for treatment
-dds_trt <- DESeqDataSetFromMatrix(countData = practice_data,
+raw_dds_trt <- DESeqDataSetFromMatrix(countData = practice_data,
                                   colData = practice_info,
                                   design = ~ Treatment)
 
 ################################################################################
-#filtering genes with less than 10 count
-dds_ab <- dds_ab[rowSums(counts(dds_ab) > 1) < 20,]
-dds_trt <- dds_trt[rowSums(counts(dds_trt) > 1) < 20,]
+#filtering genes with less than 20 count
+# <- raw_dds_ab[rowSums(counts(raw_dds_ab) > 1) < 20,]
+#raw_dds_trt <- raw_dds_trt[rowSums(counts(raw_dds_trt) > 1) < 20,]
 
 
 ################################################################################
 #DEG extraction for Antibody factor
-dds_ab <- DESeq(dds_ab, fitType = "local", parallel = T)
+dds_ab <- DESeq(raw_dds_ab, fitType = "local", test = "Wald", parallel = T)
 
 #QC of Antibody condition
-vst_ab <- vst(dds_ab, blind = F)
+vst_ab <- vst(dds_ab, fitType = "local", blind = F)
 plotPCA(vst_ab, intgroup = "Antibody")
 
 
@@ -118,7 +109,7 @@ res_ab_mog <- lfcShrink(dds_ab, coef = "Antibody_MOG_vs_HC", type = "apeglm")
 
 ################################################################################
 #DEG extraction for Treatment factor
-dds_trt <- DESeq(dds_trt, fitType = "local", parallel = T)
+dds_trt <- DESeq(raw_dds_trt, fitType = "local", test = "Wald", parallel = T)
 
 #QC of treatment condition
 vst_trt <- vst(dds_trt, blind = F)
@@ -138,43 +129,57 @@ res_trt_oth <- lfcShrink(dds_trt, coef = "Treatment_Other_vs_Untreated",
                         type = "apeglm")
 
 ################################################################################
-#getting significant DEGs
-sig_trt_rt <- res_trt_rt[res_trt_rt$padj < 0.05 & res_trt_rt$baseMean > 50,]
-sig_trt_oth <- res_trt_oth[res_trt_oth$padj < 0.05 & res_trt_oth$baseMean > 50,]
-sig_ab_aqp <- res_ab_aqp[res_ab_aqp$padj < 0.05 & res_ab_aqp$baseMean > 50,]
-sig_ab_mog <- res_ab_mog[res_ab_mog$padj < 0.05 & res_ab_mog$baseMean > 50,]
+#gene name conversion
 
+
+################################################################################
+#getting significant DEGs
+sig_trt_rt <- res_trt_rt[!is.na(res_trt_rt$padj) & res_trt_rt$padj < 0.1 &
+            (res_trt_rt$log2FoldChange > 1 | res_trt_rt$log2FoldChange < 1),]
+sig_trt_rt <- sig_trt_rt[order(sig_trt_rt$log2FoldChange, decreasing = T),]
+
+sig_trt_oth <- res_trt_oth[!is.na(res_trt_oth$padj) & res_trt_oth$padj < 0.01 &
+            (res_trt_oth$log2FoldChange > 1 | res_trt_oth$log2FoldChange < 1),]
+sig_trt_oth <- sig_trt_oth[order(sig_trt_oth$log2FoldChange, decreasing = T),]
+
+sig_ab_aqp <- res_ab_aqp[!is.na(res_ab_aqp$padj) & res_ab_aqp$padj < 0.01 &
+            (res_ab_aqp$log2FoldChange > 1 | res_ab_aqp$log2FoldChange < 1),]
+sig_ab_aqp <- sig_ab_aqp[order(sig_ab_aqp$log2FoldChange),]
+
+sig_ab_mog <- res_ab_mog[!is.na(res_ab_mog$padj) & res_ab_mog$padj < 0.01 &
+            (res_ab_mog$log2FoldChange > 1 | res_ab_mog$log2FoldChange < 1),]
+sig_ab_mog <- sig_ab_mog[order(sig_ab_mog$log2FoldChange, decreasing = T),]
 
 
 #volcano plots
-volcano_plot_ab_aqp <- EnhancedVolcano(res_ab_aqp, x = "log2FoldChange",
-              y = "pvalue", lab = rownames(res_ab_aqp), pCutoff = 0.05,
+volcano_plot_ab_aqp <- EnhancedVolcano(sig_ab_aqp, x = "log2FoldChange",
+              y = "pvalue", lab = rownames(sig_ab_aqp), pCutoff = 0.05,
               FCcutoff = 0.57, legendPosition = "", title = "Anti-AQP4 VS HC",
               col=c('black', 'black', 'black', 'red3'), caption = "",
               subtitle = "") + coord_cartesian(xlim=c(-10, 10)
               ) + scale_x_continuous(breaks=seq(-10,10, 2))
 
 
-volcano_plot_ab_mog <- EnhancedVolcano(res_ab_mog, x = "log2FoldChange",
-              y = "pvalue", lab = rownames(res_ab_aqp), pCutoff = 0.05,
+volcano_plot_ab_mog <- EnhancedVolcano(sig_ab_mog, x = "log2FoldChange",
+              y = "pvalue", lab = rownames(sig_ab_mog), pCutoff = 0.05,
               FCcutoff = 0.57, legendPosition = "", title = "Anti-MOG VS HC",
               col=c('black', 'black', 'black', 'red3'), caption = "",
               subtitle = "") + coord_cartesian(xlim=c(-10, 10)
               ) + scale_x_continuous(breaks=seq(-10,10, 2))
 
 
-volcano_plot_trt_rt <- EnhancedVolcano(res_trt_oth, x = "log2FoldChange",
-              y = "pvalue", lab = rownames(res_trt_oth), pCutoff = 0.05,
+volcano_plot_trt_rt <- EnhancedVolcano(sig_trt_rt, x = "log2FoldChange",
+              y = "pvalue", lab = rownames(sig_trt_rt), pCutoff = 0.05,
               FCcutoff = 0.57, legendPosition = "", title = "Rituximab VS HC",
               col=c('black', 'black', 'black', 'red3'), caption = "",
               subtitle = "") + coord_cartesian(xlim=c(-10, 10)
               ) + scale_x_continuous(breaks=seq(-10,10, 2))
 
 
-volcano_plot_trt_oth <- EnhancedVolcano(res_trt_oth, x = "log2FoldChange",
-              y = "pvalue", lab = rownames(res_ab_aqp), pCutoff = 0.05,
+volcano_plot_trt_oth <- EnhancedVolcano(sig_trt_oth, x = "log2FoldChange",
+              y = "pvalue", lab = rownames(sig_trt_oth), pCutoff = 0.05,
               FCcutoff = 0.57, legendPosition = "", subtitle = "",
-              title = "Other treatments VS HC", , caption = "",
+              title = "Other treatments VS HC", caption = "",
               col=c('black', 'black', 'black', 'red3')) + coord_cartesian(
               xlim=c(-10, 10)) + scale_x_continuous(breaks=seq(-10,10, 2))
 
@@ -191,36 +196,38 @@ ggsave(plot = volcano_plot_all, filename = "Volcano Plot.pdf", width = 35,
 #Enrichment analysis
 #GO enrichment
 GO_results_aqp_all <- enrichGO(gene = rownames(sig_ab_aqp), OrgDb = org.Hs.eg.db,
-                               keyType = "SYMBOL", ont = "ALL")
-plot(barplot(GO_results_aqp_all, showCategory = 20, title = "AQP_VS_HC"))
-
+                               keyType = "ENSEMBL", ont = "ALL")
+enriched_aqp <- plot(barplot(GO_results_aqp_all, showCategory = 10,
+                             title = "AQP_VS_HC"))
+##
 
 GO_results_mog_all <- enrichGO(gene = rownames(sig_ab_mog), OrgDb = org.Hs.eg.db,
-                               keyType = "SYMBOL", ont = "ALL")
-plot(barplot(GO_results_mog_all, showCategory = 20, title = "MOG_VS_HC"))
-
+                               keyType = "ENSEMBL", ont = "ALL")
+enriched_mog <- plot(barplot(GO_results_mog_all, showCategory = 10,
+                             title = "MOG_VS_HC"))
+##
 
 GO_results_rit_all <- enrichGO(gene = rownames(sig_trt_rt), OrgDb = org.Hs.eg.db,
-                               keyType = "SYMBOL", ont = "ALL")
-plot(barplot(GO_results_rit_all, showCategory = 20, title = "RIT_VS_HC"))
-
+                               keyType = "ENSEMBL", ont = "ALL")
+enriched_rit <- plot(barplot(GO_results_rit_all, showCategory = 20,
+                             title = "Rituximab_VS_HC"))
+##
 
 GO_results_oth_all <- enrichGO(gene = rownames(sig_trt_oth), OrgDb = org.Hs.eg.db,
-                               keyType = "SYMBOL", ont = "ALL")
-plot(barplot(GO_results_oth_all, showCategory = 20, title = "OTH_VS_HC"))
-
-
+                               keyType = "ENSEMBL", ont = "ALL")
+enriched_oth <- plot(barplot(GO_results_oth_all, showCategory = 20,
+                             title = "Other treatments_VS_HC"))
 
 ################################################################################
 #AQP
 ranks_aqp <- res_ab_aqp$log2FoldChange
 names(ranks_aqp) <- rownames(res_ab_aqp)
-title(main = "AQP", barplot(sort(ranks_aqp, decreasing = T)))
+title(main = "Anti-AQP", barplot(sort(ranks_aqp, decreasing = T)))
 
 #MOG
 ranks_mog <- res_ab_mog$log2FoldChange
 names(ranks_mog) <- rownames(res_ab_mog)
-title(main = "MOG", barplot(sort(ranks_mog, decreasing = T)))
+title(main = "Anti-MOG", barplot(sort(ranks_mog, decreasing = T)))
 
 #Ritux
 ranks_rit <- res_trt_rt$log2FoldChange
@@ -252,6 +259,17 @@ rlg_heatmap <- pheatmap(assay(rlg)[select,], cluster_rows=FALSE,
 
 #combination PCA
 plotPCA(vsd, intgroup = c("Antibody", "Treatment"))
+
+#dendrogram of samples
+cluster_ab <- counts(dds_ab, normalized = T)
+cluster_trt <- counts(dds_trt, normalized = T)
+
+cluster_ab_plot <- plot(hclust(dist(t(cluster_ab))),
+                        main = "Clustering of samples based on antibodies",
+                        labels = colData(dds_ab)$Antibody, sub = "", xlab = "")
+cluster_trt_plot <- plot(hclust(dist(t(cluster_trt))),
+                         main = "Clustering of samples based on treatments",
+                         labels = colData(dds_ab)$Treatment, sub = "", xlab = "")
 #save R image
 save.image(".RData")
 ################################################################################
